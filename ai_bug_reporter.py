@@ -15,6 +15,14 @@ load_dotenv()
 # ─── Streamlit page config ───────────────────────────────────────────────────
 st.set_page_config(page_title="🐞 AI Bug Reporter", layout="wide")
 
+# ─── JIRA field mapping (update with your project IDs) ────────────────────────
+JIRA_CUSTOMFIELDS = {
+    "steps":    "customfield_10420",  # Steps to Reproduce (ADF)
+    "expected": "customfield_10422",  # Expected Result   (ADF)
+    "actual":   "customfield_10421",  # Actual Result     (ADF)
+    "env":      "customfield_10618"   # Environment (select list)
+}
+
 # ─── Session state defaults ───────────────────────────────────────────────────
 if 'bug' not in st.session_state:
     st.session_state.bug = None
@@ -98,7 +106,7 @@ environment = st.selectbox(
     help="Select the environment where the bug occurred"
 )
 
-VERSION_OPTIONS = ["Kal Sense Version 1.4", "Kal Sense Version 1.3"]
+VERSION_OPTIONS = ["Kal Sense Version 1.5","Kal Sense Version 1.4", "Kal Sense Version 1.3"]
 fix_versions = st.multiselect(
     "🏷 Fix Versions",
     options=VERSION_OPTIONS,
@@ -130,6 +138,18 @@ gen_btn = st.button("Generate Bug", key="gen")
 # ─── Initialize OpenAI client ────────────────────────────────────────────────
 client = OpenAI(api_key=openai_key)
 
+# ─── Helper: validate & parse JSON ───────────────────────────────────────────
+REQUIRED_KEYS = {"title", "description", "steps", "expected", "actual"}
+
+def parse_bug_json(raw: str):
+    m = re.search(r"\{.*\}", raw, flags=re.DOTALL)
+    js = m.group(0) if m else raw
+    bug = json.loads(js)
+    missing = REQUIRED_KEYS.difference(bug)
+    if missing:
+        raise ValueError(f"Missing keys: {', '.join(missing)}")
+    return bug
+
 # ─── Generate Bug Report under spinner ────────────────────────────────────────
 if gen_btn:
     if not bug_desc.strip():
@@ -137,7 +157,7 @@ if gen_btn:
     else:
         prompt = (
             "You are a helpful assistant that formats bug reports as JSON.\n"
-            "Generate a JSON object with fields: title, description, steps (array), expected.\n"
+            "Generate a JSON object with fields: title, description, steps (array), expected, actual.\n"
             f"Bug description:\n{bug_desc}\n"
         )
         if image_caption:
@@ -146,7 +166,7 @@ if gen_btn:
 
         with st.spinner("Generating bug report…"):
             res = client.chat.completions.create(
-                model="gpt-4o-mini",
+                model="gpt-4o",
                 messages=[
                     {"role":"system","content":"You format bug reports as JSON."},
                     {"role":"user","content":prompt}
@@ -155,40 +175,36 @@ if gen_btn:
                 max_tokens=500
             )
 
-        raw = res.choices[0].message.content
-        m = re.search(r"\{.*\}", raw, flags=re.DOTALL)
-        js = m.group(0) if m else raw
-
         try:
-            st.session_state.bug = json.loads(js)
+            bug = parse_bug_json(res.choices[0].message.content)
+            st.session_state.bug = bug
             st.session_state.jira_feedback = None
             st.success("✅ Bug report generated!")
         except Exception as e:
             st.error(f"Failed to parse JSON: {e}")
-            st.code(raw, language="json")
+            st.code(res.choices[0].message.content, language="json")
 
 # ─── Display & Create in JIRA ────────────────────────────────────────────────
 bug = st.session_state.bug
 if bug:
     st.markdown("## Generated Bug Report")
 
-    st.markdown("**Title**")
-    st.code(bug["title"], language="")
-
-    st.markdown("**Description**")
-    st.code(bug["description"], language="")
+    for key, label in [
+        ("title", "Title"),
+        ("description", "Description"),
+        ("expected", "Expected Result"),
+        ("actual", "Actual Result")
+    ]:
+        st.markdown(f"**{label}**")
+        st.code(bug[key], language="")
 
     st.markdown("**Steps to Reproduce**")
-    steps_text = "\n".join(f"{i+1}. {s}" for i, s in enumerate(bug["steps"]))
+    steps_text = "\n".join(f"{i + 1}. {s}" for i, s in enumerate(bug["steps"]))
     st.code(steps_text, language="")
-
-    st.markdown("**Expected Result**")
-    st.code(bug["expected"], language="")
 
     # ─── Create in JIRA ──────────────────────────────────────────────────────
     create_jira = st.button("Create in JIRA", key="create_jira")
     if create_jira:
-        # required fields check
         required = [
             ("URL", jira_url),
             ("Email", jira_email),
@@ -203,38 +219,37 @@ if bug:
         else:
             # build ADF for description
             lines = [bug["description"], "Steps to Reproduce:"] \
-                  + [f"{i+1}. {s}" for i, s in enumerate(bug["steps"])] \
-                  + ["Expected Result:", bug["expected"]]
+                    + [f"{i + 1}. {s}" for i, s in enumerate(bug["steps"])] \
+                    + ["Expected Result:", bug["expected"], "Actual Result:", bug["actual"]]
             adf_content = [
-                {"type":"paragraph", "content":[{"type":"text","text":line}]}
+                {"type": "paragraph", "content": [{"type": "text", "text": line}]}
                 for line in lines
             ]
-            description_adf = {"type":"doc","version":1,"content":adf_content}
+            description_adf = {"type": "doc", "version": 1, "content": adf_content}
 
-            # payload
             payload = {
                 "fields": {
-                    "project":         {"key": jira_proj},
-                    "summary":         bug["title"],
-                    "description":     description_adf,
-                    "issuetype":       {"name":"Bug"},
-                    "customfield_10618": { "value": environment },
-                    "fixVersions":       [{"name": v} for v in fix_versions],
-                    "customfield_10420": {"type":"doc","version":1,"content":[
-                        {"type":"paragraph","content":[{"type":"text","text":s}]}
+                    "project": {"key": jira_proj},
+                    "summary": bug["title"],
+                    "description": description_adf,
+                    "issuetype": {"name": "Bug"},
+                    JIRA_CUSTOMFIELDS["env"]: {"value": environment},
+                    "fixVersions": [{"name": v} for v in fix_versions],
+                    JIRA_CUSTOMFIELDS["steps"]: {"type": "doc", "version": 1, "content": [
+                        {"type": "paragraph", "content": [{"type": "text", "text": s}]}
                         for s in bug["steps"]
                     ]},
-                    "customfield_10421": {"type":"doc","version":1,"content":[
-                        {"type":"paragraph","content":[{"type":"text","text":bug["description"]}]}
+                    JIRA_CUSTOMFIELDS["expected"]: {"type": "doc", "version": 1, "content": [
+                        {"type": "paragraph", "content": [{"type": "text", "text": bug["expected"]}]}
                     ]},
-                    "customfield_10422": {"type":"doc","version":1,"content":[
-                        {"type":"paragraph","content":[{"type":"text","text":bug["expected"]}]}
+                    JIRA_CUSTOMFIELDS["actual"]: {"type": "doc", "version": 1, "content": [
+                        {"type": "paragraph", "content": [{"type": "text", "text": bug["actual"]}]}
                     ]},
                 }
             }
-            url  = jira_url.rstrip("/") + "/rest/api/3/issue"
+            url = jira_url.rstrip("/") + "/rest/api/3/issue"
             auth = HTTPBasicAuth(jira_email, jira_token)
-            headers = {"Content-Type":"application/json"}
+            headers = {"Content-Type": "application/json"}
 
             with st.spinner("Creating issue in JIRA…"):
                 resp = requests.post(url, auth=auth, headers=headers, json=payload)
@@ -243,9 +258,7 @@ if bug:
                 key = resp.json().get("key")
                 st.session_state.jira_feedback = ("success", key)
             else:
-                st.session_state.jira_feedback = ("error",
-                                                  resp.status_code,
-                                                  resp.text)
+                st.session_state.jira_feedback = ("error", resp.status_code, resp.text)
 
     # ─── Show feedback ────────────────────────────────────────────────────────
     fb = st.session_state.jira_feedback
