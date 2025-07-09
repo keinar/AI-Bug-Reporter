@@ -143,4 +143,4 @@ For major changes, please open an issue first to discuss what you would like to 
 
 ## License
 
-MIT
+[MIT](https://github.com/keinar/AI-Bug-Reporter/blob/main/LICENSE)
