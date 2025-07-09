@@ -4,6 +4,8 @@ A Streamlit-based tool for generating detailed bug reports using OpenAI **and Go
 
 ---
 
+<img alt="img.png" height="500" src="img.png" width="1000"/>
+
 ## Features
 
 - **Free-text bug description** with optional screenshot upload (BLIP-based captioning).
