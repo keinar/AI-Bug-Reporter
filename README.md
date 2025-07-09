@@ -34,13 +34,34 @@ A Streamlit-based tool for generating detailed bug reports using OpenAI **and Go
 
 ---
 
+
+## ⚠️ Jira Custom Fields Mapping
+
+> **Important:** To enable issue creation in Jira, you must update the custom field IDs in `settings.py` (`JIRA_CUSTOMFIELDS`) to match your own Jira project’s configuration.
+>
+> Example:
+>
+> ```python
+> JIRA_CUSTOMFIELDS = {
+>     "steps":    "customfield_10420",
+>     "expected": "customfield_10422",
+>     "actual":   "customfield_10421",
+>     "env":      "customfield_10618"
+> }
+> ```
+>
+> - Find the custom field IDs in your Jira instance (Admin → Issues → Custom fields, or by inspecting the API).
+> - **If the IDs don’t match, Jira will return field errors or the issue won’t be created as expected.**
+
+___
+
 ## Installation
 
 1. Clone this repository:
 
    ```bash
-   git clone https://github.com/your-org/ai-bug-reporter.git
-   cd ai-bug-reporter
+   git clone https://github.com/keinar/AI-Bug-Reporter.git
+   cd AI-Bug-Reporter
    ```
 
 2. Create a virtual environment and install dependencies:
