@@ -65,9 +65,24 @@ fix_versions = st.multiselect("🏷 Fix Versions", options=VERSION_OPTIONS)
 
 # -- BLIP -- #
 image_caption = None
+img = None
+
 if bug_image:
-    with st.spinner("Processing screenshot…"):
-        img, image_caption = generate_image_caption(bug_image)
+    # Keys for caching based on image filename (could use more unique ID if needed)
+    img_key = f"img_{bug_image.name}"
+    caption_key = f"caption_{bug_image.name}"
+
+    if img_key in st.session_state and caption_key in st.session_state:
+        # Already processed in session - fetch from cache
+        img = st.session_state[img_key]
+        image_caption = st.session_state[caption_key]
+    else:
+        # New image - process and cache result
+        with st.spinner("Processing screenshot…"):
+            img, image_caption = generate_image_caption(bug_image)
+        st.session_state[img_key] = img
+        st.session_state[caption_key] = image_caption
+
     st.image(img, caption=bug_image.name, width=300)
     st.success("Screenshot processed!")
 
